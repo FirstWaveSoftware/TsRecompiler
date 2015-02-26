@@ -5,7 +5,7 @@ using System.Runtime.InteropServices;
 
 
 static class ProcessInfo {
-	
+
 	[DllImport("kernel32.dll")]
 	static extern IntPtr GetCurrentProcess();
 

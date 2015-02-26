@@ -78,10 +78,10 @@ class Program {
 	private void ProcessChangedFile(String file, List<String> change_list, ref Boolean is_typing) {
 		if (!String.IsNullOrEmpty(file) && !IsIgnored(file)) {
 			if (file.EndsWith(".d.ts")) {
-				Logger.Debug("Typing file changed: {0}", file);
+				Logger.Log("Typing file changed: {0}", file);
 				is_typing = true;
 			} else {
-				Logger.Debug("Source file changed: {0}", file);
+				Logger.Log("Source file changed: {0}", file);
 				change_list.Add(file);
 			}
 		}
@@ -138,7 +138,7 @@ class Program {
 				return;
 			}
 			// start tsc
-			Logger.Debug("Starting tsc {0}", tsc_arguments);
+			Logger.Log("Starting TypeScript compilation{0}", this.args.Debug ? String.Format(" (tsc {0})", tsc_arguments) : String.Empty);
 			DateTime time_start = DateTime.Now;
 			var compiler = Process.Start(new ProcessStartInfo() {
 				FileName = "tsc",
