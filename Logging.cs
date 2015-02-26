@@ -28,7 +28,8 @@ class Logging {
 	}
 
 	public void Debug(String message = null, params Object[] args) {
-		WriteLine(Console.Error, message, args);
+		if (this.EnableDebug)
+			WriteLine(Console.Error, message, args);
 	}
 
 	private void WriteLine(TextWriter stream, String message, Object[] args, Boolean error = false) {
