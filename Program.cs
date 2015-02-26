@@ -20,6 +20,8 @@ class Program {
 			arguments = new Arguments(args);
 			if (arguments.Usage)
 				Arguments.PrintUsage();
+			else if (arguments.Version)
+				Arguments.PrintVersion(true);
 			else
 				new Program(arguments).Run();
 			return 0;

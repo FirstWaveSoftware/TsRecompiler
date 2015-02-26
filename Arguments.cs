@@ -10,6 +10,7 @@ class Arguments {
 
 	private List<String> _ignores;
 
+	public Boolean Version { get; private set; }
 	public Boolean Usage { get; private set; }
 	public Boolean Debug { get; private set; }
 	public Boolean Watch { get; private set; }
@@ -32,6 +33,9 @@ class Arguments {
 					break;
 				case "--watch":
 					this.Watch = true;
+					break;
+				case "--version":
+					this.Version = true;
 					break;
 				case "-h":
 				case "--help":
@@ -63,10 +67,18 @@ class Arguments {
 			Console.Error.WriteLine(resolver(attrib));
 	}
 
+	public static void PrintVersion(Boolean title = false) {
+		var assembly = typeof(Arguments).Assembly;
+		var version = assembly.GetName().Version.ToString();
+		if (title)
+			PrintAttribute<AssemblyTitleAttribute>(assembly, a => a.Title);
+		Console.Error.WriteLine("Version: {0}", version);
+	}
+
 	public static void PrintUsage() {
 		var assembly = typeof(Arguments).Assembly;
 		PrintAttribute<AssemblyTitleAttribute>(assembly, a => a.Title);
-		PrintAttribute<AssemblyFileVersionAttribute>(assembly, a => String.Format("version {0}", a.Version));
+		PrintVersion();
 		PrintAttribute<AssemblyDescriptionAttribute>(assembly, a => a.Description);
 		PrintAttribute<AssemblyCopyrightAttribute>(assembly, a => a.Copyright);
 		Console.Error.WriteLine(@"
