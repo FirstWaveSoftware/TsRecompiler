@@ -1,4 +1,4 @@
-﻿
+
 using System;
 using System.Collections.Generic;
 using System.Collections.Concurrent;
@@ -40,12 +40,14 @@ class Watcher : IDisposable {
 		this.changes.Add(args.Name);
 	}
 
-	public void WaitFileChanges(TimeSpan timeout, Action<String> callback) {
+	public Boolean WaitFileChanges(TimeSpan timeout, Action<String> callback) {
 		String name;
-		if (this.changes.TryTake(out name, Timeout.Infinite))
-			callback(name);
+		if (!this.changes.TryTake(out name, timeout))
+			return false;
+		callback(name);
 		while (this.changes.TryTake(out name, timeout))
 			callback(name);
+		return true;
 	}
 
 }

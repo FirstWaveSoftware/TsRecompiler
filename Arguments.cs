@@ -1,4 +1,4 @@
-﻿
+
 using System;
 using System.Collections;
 using System.Collections.Generic;
@@ -14,6 +14,7 @@ class Arguments {
 	public Boolean Usage { get; private set; }
 	public Boolean Debug { get; private set; }
 	public Boolean Watch { get; private set; }
+	public Boolean MonitorParent { get; private set; }
 	public IEnumerable<String> Ignores { get; private set; }
 
 	public Arguments(String[] args) {
@@ -22,18 +23,6 @@ class Arguments {
 		var unknowns = new List<String>();
 		for (Int32 i = 0; i < args.Length; ++i) {
 			switch (args[i]) {
-				case "--ignore":
-					var dir = args[++i];
-					if (!dir.EndsWith(Path.DirectorySeparatorChar.ToString()))
-						dir += Path.DirectorySeparatorChar;
-					this._ignores.Add(dir);
-					break;
-				case "--debug":
-					this.Debug = true;
-					break;
-				case "--watch":
-					this.Watch = true;
-					break;
 				case "--version":
 					this.Version = true;
 					break;
@@ -41,13 +30,30 @@ class Arguments {
 				case "--help":
 					this.Usage = true;
 					break;
+				case "--debug":
+					this.Debug = true;
+					break;
+				case "--ignore":
+					var dir = args[++i];
+					if (!dir.EndsWith(Path.DirectorySeparatorChar.ToString()))
+						dir += Path.DirectorySeparatorChar;
+					this._ignores.Add(dir);
+					break;
+				case "--watch":
+					this.Watch = true;
+					break;
+				case "--monitor-parent":
+					if (PlatformID.Unix == Environment.OSVersion.Platform)
+						throw new ArgumentException(String.Format("Monitoring the parent process is not appropriate for this platform ({0})", Environment.OSVersion.Platform));
+					this.MonitorParent = true;
+					break;
 				default:
 					unknowns.Add(args[i]);
 					break;
 			}
 		}
 		if (0 < unknowns.Count)
-			throw new CodedException(1, new ArgumentException(String.Format("{0} unexpected arguments: {1}", unknowns.Count, String.Join(", ", unknowns))));
+			throw new ArgumentException(String.Format("{0} unexpected arguments: {1}", unknowns.Count, String.Join(", ", unknowns)));
 		if (this.Debug)
 			foreach (var prop in this.GetType().GetProperties())
 				Console.Error.WriteLine("{0}: {1}", prop.Name,

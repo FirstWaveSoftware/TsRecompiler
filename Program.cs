@@ -1,4 +1,4 @@
-﻿
+
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -45,27 +45,37 @@ class Program {
 	}
 
 	private Arguments args;
+	private Process parent_process;
 
 	private Program(Arguments args) {
 		this.args = args;
+		if (args.MonitorParent)
+			this.parent_process = Process.GetProcessById(ProcessInfo.GetParentProcessId());
 	}
+
+	private Boolean Continue { get { return !this.args.MonitorParent || !parent_process.HasExited; } }
 
 	private void Run() {
 		Console.Error.WriteLine("Performing initial compilation...");
 		Compile(ListTypings(), ListSources());
 		if (this.args.Watch)
-			using (var watcher = new Watcher()) {
-				var change_list = new List<String>();
-				Boolean typing_changed;
-				while (true) {
-					change_list.Clear();
-					typing_changed = false;
+			this.Watch();
+	}
+
+	private void Watch() {
+		Boolean changes_detected = true, typing_changed;
+		var change_list = new List<String>();
+		using (var watcher = new Watcher()) {
+			while (this.Continue) {
+				change_list.Clear();
+				typing_changed = false;
+				if (changes_detected)
 					Console.Error.WriteLine("Waiting for changes...");
-					watcher.WaitFileChanges(TimeSpan.FromSeconds(0.5), (file) => this.ProcessChangedFile(file, change_list, ref typing_changed));
+				if (changes_detected = watcher.WaitFileChanges(TimeSpan.FromSeconds(0.5), (file) => this.ProcessChangedFile(file, change_list, ref typing_changed)))
 					if ((0 < change_list.Count) || typing_changed)
 						Compile(ListTypings(), typing_changed ? ListSources() : change_list);
-				}
 			}
+		}
 	}
 
 	private void ProcessChangedFile(String file, List<String> change_list, ref Boolean is_typing) {
