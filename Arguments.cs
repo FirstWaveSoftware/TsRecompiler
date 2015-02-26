@@ -66,7 +66,7 @@ class Arguments {
 	public static void PrintUsage() {
 		var assembly = typeof(Arguments).Assembly;
 		PrintAttribute<AssemblyTitleAttribute>(assembly, a => a.Title);
-		PrintAttribute<AssemblyVersionAttribute>(assembly, a => String.Format("version {0}", a.Version));
+		PrintAttribute<AssemblyFileVersionAttribute>(assembly, a => String.Format("version {0}", a.Version));
 		PrintAttribute<AssemblyDescriptionAttribute>(assembly, a => a.Description);
 		PrintAttribute<AssemblyCopyrightAttribute>(assembly, a => a.Copyright);
 		Console.Error.WriteLine(@"

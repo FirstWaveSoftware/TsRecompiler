@@ -51,33 +51,25 @@ class Program {
 	private void Run() {
 		Console.Error.WriteLine("Performing initial compilation...");
 		Compile(ListTypings(), ListSources());
-		if (this.args.Watch) {
-			var fsw = new FileSystemWatcher() {
-				Path = ".",
-				Filter = "*.ts",
-				IncludeSubdirectories = true,
-				EnableRaisingEvents = true
-			};
-			var change_list = new List<String>();
-			Boolean typing_changed;
-			while (true) {
-				change_list.Clear();
-				typing_changed = false;
-				Console.Error.WriteLine("Waiting for changes...");
-				Wait(fsw, change_list, Timeout.Infinite, ref typing_changed);
-				while (Wait(fsw, change_list, 500, ref typing_changed));
-				if ((0 < change_list.Count) || typing_changed)
-					Compile(ListTypings(), typing_changed ? ListSources() : change_list);
+		if (this.args.Watch)
+			using (var watcher = new Watcher()) {
+				var change_list = new List<String>();
+				Boolean typing_changed;
+				while (true) {
+					change_list.Clear();
+					typing_changed = false;
+					Console.Error.WriteLine("Waiting for changes...");
+					watcher.WaitFileChanges(TimeSpan.FromSeconds(0.5), (file) => this.ProcessChangedFile(file, change_list, ref typing_changed));
+					if ((0 < change_list.Count) || typing_changed)
+						Compile(ListTypings(), typing_changed ? ListSources() : change_list);
+				}
 			}
-		}
 	}
 
-	private Boolean Wait(FileSystemWatcher fsw, List<String> change_list, Int32 timeout, ref Boolean is_typing) {
-		WaitForChangedResult change = fsw.WaitForChanged(WatcherChangeTypes.Created | WatcherChangeTypes.Changed, timeout);
-		String file = change.Name;
+	private void ProcessChangedFile(String file, List<String> change_list, ref Boolean is_typing) {
 		if (args.Debug)
-			Console.Error.WriteLine("Change: {0}, Name: {1}, TimedOut: {2}", change.ChangeType, change.Name, change.TimedOut);
-		if (!change.TimedOut && !String.IsNullOrEmpty(file) && !IsIgnored(file)) {
+			Console.Error.WriteLine("Changed file: {0}", file);
+		if (!String.IsNullOrEmpty(file) && !IsIgnored(file)) {
 			if (file.EndsWith(".d.ts")) {
 				if (args.Debug)
 					Console.Error.WriteLine("Typing file changed: {0}", file);
@@ -88,7 +80,6 @@ class Program {
 				change_list.Add(file);
 			}
 		}
-		return !change.TimedOut;
 	}
 
 	private Boolean IsIgnored(String file) {
@@ -127,14 +118,23 @@ class Program {
 		String cwd = Directory.GetCurrentDirectory();
 		StreamWriter response_file = null;
 		try {
+			Int32 nr_files = 0;
 			// compile repsonse file
 			response_file = new StreamWriter(File.OpenWrite(response_file_name));
-			foreach (String file in typings)
+			foreach (String file in typings) {
 				response_file.WriteLine(file);
-			foreach (String file in sources)
+				++nr_files;
+			}
+			foreach (String file in sources) {
 				response_file.WriteLine(file);
+				++nr_files;
+			}
 			response_file.Close();
 			response_file = null;
+			if (0 == nr_files) {
+				Console.Error.WriteLine("Nothing to compile");
+				return;
+			}
 			// start tsc
 			if (args.Debug)
 				Console.Error.WriteLine("Starting tsc {0}", tsc_arguments);
