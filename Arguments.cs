@@ -2,8 +2,8 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
-using System.Reflection;
 using System.IO;
+using System.Reflection;
 
 
 class Arguments {
@@ -56,7 +56,7 @@ class Arguments {
 			throw new ArgumentException(String.Format("{0} unexpected arguments: {1}", unknowns.Count, String.Join(", ", unknowns)));
 		if (this.Debug)
 			foreach (var prop in this.GetType().GetProperties())
-				Console.Error.WriteLine("{0}: {1}", prop.Name,
+				Program.Logger.Debug("{0}: {1}", prop.Name,
 					typeof(IEnumerable).IsAssignableFrom(prop.PropertyType) ?
 						String.Join(", ", Stringify((IEnumerable)prop.GetValue(this))) :
 						prop.GetValue(this));
@@ -70,7 +70,7 @@ class Arguments {
 
 	private static void PrintAttribute<TAttrib>(Assembly assembly, Func<TAttrib, String> resolver) where TAttrib : Attribute {
 		foreach (var attrib in assembly.GetCustomAttributes<TAttrib>())
-			Console.Error.WriteLine(resolver(attrib));
+			Console.WriteLine(resolver(attrib));
 	}
 
 	public static void PrintVersion(Boolean title = false) {
@@ -78,7 +78,7 @@ class Arguments {
 		var version = assembly.GetName().Version.ToString();
 		if (title)
 			PrintAttribute<AssemblyTitleAttribute>(assembly, a => a.Title);
-		Console.Error.WriteLine("Version: {0}", version);
+		Console.WriteLine("Version: {0}", version);
 	}
 
 	public static void PrintUsage() {
@@ -87,7 +87,7 @@ class Arguments {
 		PrintVersion();
 		PrintAttribute<AssemblyDescriptionAttribute>(assembly, a => a.Description);
 		PrintAttribute<AssemblyCopyrightAttribute>(assembly, a => a.Copyright);
-		Console.Error.WriteLine(@"
+		Console.WriteLine(@"
 Usage:
 tsrc [--watch] [--ignore <dir>]+
 tsrc (--help | -h)
