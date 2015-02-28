@@ -3,56 +3,75 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Text;
+using System.Threading;
 
 
 class Program {
 
-	private static readonly TimeSpan watch_timeout = TimeSpan.FromMilliseconds(500);
 	private const String response_file_name = ".tsrc";
-	private const String tsc_arguments = "--module commonjs --sourceMap --target ES5 @" + response_file_name;
-	
+
 	public static readonly Logging Logger = new Logging("[tsrc]");
 
 	public static Int32 Main(String[] args) {
-		Arguments arguments = null;
 		try {
-			arguments = new Arguments(args);
+			Arguments arguments = new Arguments(args);
 			if (arguments.Usage)
 				Arguments.PrintUsage();
 			else if (arguments.Version)
-				Arguments.PrintVersion(true);
+				Arguments.PrintVersion();
 			else
 				new Program(arguments).Run();
 			return 0;
-		} catch (CodedException ex) {
-			var inner_message = (null != ex.InnerException) ? ex.InnerException.Message : null;
-			var message = String.IsNullOrEmpty(inner_message) ? ex.Message : String.Format("{0}: {1}", ex.Message, inner_message);
-			Logger.Error("{0}{1}{2}", message, Environment.NewLine, ex.StackTrace);
-			return ex.StatusCode;
+		} catch (CodedException codex) {
+			PrintException(codex);
+			return codex.StatusCode;
 		} catch (Exception ex) {
-			Logger.Error(ex.Message);
+			PrintException(ex);
 			return 1;
 		}
 	}
 
-	private Arguments args;
-	private Process parent_process;
+	private static void PrintException(Exception ex) {
+		while (null != ex) {
+			if (!String.IsNullOrEmpty(ex.Message)) {
+				Logger.Error(ex.Message);
+				Logger.Debug(ex.StackTrace);
+			}
+			ex = ex.InnerException;
+		}
+	}
+
+	private readonly Arguments args;
+	private readonly Process parent_process;
+	private readonly String tsc_arguments;
 
 	private Program(Arguments args) {
 		this.args = args;
 		Logger.EnableDebug = this.args.Debug;
+		// Obtain handle to parent process immediately; minimise window of opportunity for reuse of PPID.
 		if (this.args.MonitorParent) {
 			Logger.Debug("Attempting to obtain parent process ID...");
 			this.parent_process = Process.GetProcessById(ProcessInfo.GetParentProcessId());
-			Logger.Log("Will exit with parent process {0} ({1})", this.parent_process.Id, this.parent_process.ProcessName);
+			Logger.Debug("Will exit with parent process {0} ({1})", this.parent_process.Id, this.parent_process.ProcessName);
 		}
+		// Build tsc arguments
+		var tsc_args = new StringBuilder();
+		if (!String.IsNullOrEmpty(this.args.Module))
+			tsc_args.AppendFormat("--module {0} ", this.args.Module);
+		if (this.args.SourceMap)
+			tsc_args.Append("--sourceMap ");
+		if (!String.IsNullOrEmpty(this.args.Target))
+			tsc_args.AppendFormat("--target {0} ", this.args.Target);
+		tsc_args.AppendFormat("@{0}", response_file_name);
+		this.tsc_arguments = tsc_args.ToString();
 	}
 
-	private Boolean Continue { get { return !this.args.MonitorParent || !parent_process.HasExited; } }
+	private Boolean Continue { get { return !this.args.MonitorParent || !this.parent_process.HasExited; } }
 
 	private void Run() {
 		Logger.Log("Performing initial compilation...");
-		Compile(ListTypings(), ListSources());
+		this.Compile(this.ListTypings(), this.ListSources());
 		if (this.args.Watch) {
 			Logger.Debug("Watch mode enabled");
 			this.Watch();
@@ -68,15 +87,15 @@ class Program {
 				typing_changed = false;
 				if (changes_detected)
 					Logger.Log("Waiting for changes...");
-				if (changes_detected = watcher.WaitFileChanges(watch_timeout, (file) => this.ProcessChangedFile(file, change_list, ref typing_changed)))
+				if (changes_detected = watcher.WaitFileChanges(this.args.WatchTimeout, (file) => this.ProcessChangedFile(file, change_list, ref typing_changed)))
 					if ((0 < change_list.Count) || typing_changed)
-						Compile(ListTypings(), typing_changed ? ListSources() : change_list);
+						this.Compile(this.ListTypings(), typing_changed ? this.ListSources() : change_list);
 			}
 		}
 	}
 
 	private void ProcessChangedFile(String file, List<String> change_list, ref Boolean is_typing) {
-		if (!String.IsNullOrEmpty(file) && !IsIgnored(file)) {
+		if (!String.IsNullOrEmpty(file) && !this.IsIgnored(file)) {
 			if (file.EndsWith(".d.ts")) {
 				Logger.Log("Typing file changed: {0}", file);
 				is_typing = true;
@@ -99,7 +118,7 @@ class Program {
 	private IEnumerable<String> ListSources() {
 		foreach (String enumerated in Directory.EnumerateFiles(".", "*.ts", SearchOption.AllDirectories)) {
 			String file = enumerated.Substring(2);
-			if (!file.EndsWith(".d.ts") && !IsIgnored(file)) {
+			if (!file.EndsWith(".d.ts") && !this.IsIgnored(file)) {
 				Logger.Debug("ListSources(): {0}", file);
 				yield return file;
 			}
@@ -109,7 +128,7 @@ class Program {
 	private IEnumerable<String> ListTypings() {
 		foreach (String enumerated in Directory.EnumerateFiles(".", "*.d.ts", SearchOption.AllDirectories)) {
 			String file = enumerated.Substring(2);
-			if (!IsIgnored(file)) {
+			if (!this.IsIgnored(file)) {
 				Logger.Debug("ListTypings(): {0}", file);
 				yield return file;
 			}
@@ -121,7 +140,7 @@ class Program {
 		StreamWriter response_file = null;
 		try {
 			Int32 nr_files = 0;
-			// compile repsonse file
+			// Compile response file
 			response_file = new StreamWriter(File.OpenWrite(response_file_name));
 			foreach (String file in typings) {
 				response_file.WriteLine(file);
@@ -137,34 +156,48 @@ class Program {
 				Logger.Log("Nothing to compile");
 				return;
 			}
-			// start tsc
-			Logger.Log("Starting TypeScript compilation{0}", this.args.Debug ? String.Format(" (tsc {0})", tsc_arguments) : String.Empty);
+			// Start tsc
+			Logger.Log("Compiling TypeScript{0}...", this.args.Debug ? String.Format(" (tsc {0})", this.tsc_arguments) : String.Empty);
 			DateTime time_start = DateTime.Now;
-			var compiler = Process.Start(new ProcessStartInfo() {
+			using (var compiler = Process.Start(new ProcessStartInfo() {
 				FileName = "tsc",
-				Arguments = tsc_arguments,
+				Arguments = this.tsc_arguments,
 				UseShellExecute = false,
-				RedirectStandardError = true
-			});
-			// process tsc output
-			while (!compiler.StandardError.EndOfStream) {
-				String line = compiler.StandardError.ReadLine();
-				if (line.StartsWith(cwd))
-					line = line.Substring(cwd.Length + 1);
-				if (line.Contains("error"))
-					Logger.Error(line);
-				else
-					Logger.Log(line);
+				RedirectStandardError = true,
+				RedirectStandardOutput = true
+			})) {
+				// Process tsc output
+				String line;
+				while (!compiler.HasExited) {
+					// Attempt to read line from either stream
+					line = (-1 < compiler.StandardError.Peek()) ? compiler.StandardError.ReadLine()
+						: (-1 < compiler.StandardOutput.Peek()) ? compiler.StandardOutput.ReadLine()
+						: null;
+					// Nothing read; re-poll after sleep
+					if (null == line) {
+						Thread.Sleep(20);
+						continue;
+					}
+					// Remove current directory from start of line (relative is tidier)
+					if (line.StartsWith(cwd))
+						line = line.Substring(cwd.Length + 1);
+					// Print errors in red
+					if (line.Contains("error"))
+						Logger.Error(line);
+					else
+						Logger.Log(line);
+				}
+				// Compute and print duration
+				DateTime time_stop = DateTime.Now;
+				TimeSpan duration = time_stop - time_start;
+				Logger.Log(
+					"Compilation completed {0} (in {1} seconds)",
+					(0 == compiler.ExitCode) ? "successfully" : "with errors",
+					duration.ToString(@"s\.f"));
+				// Throw up if not watching (looping)
+				if ((0 != compiler.ExitCode) && !this.args.Watch)
+					throw new CodedException(compiler.ExitCode);
 			}
-			DateTime time_stop = DateTime.Now;
-			compiler.WaitForExit();
-			TimeSpan duration = time_stop - time_start;
-			if ((0 != compiler.ExitCode) && !this.args.Watch)
-				throw new CodedException(compiler.ExitCode, message: "Compilation Failed");
-			Logger.Log(
-				"Compilation completed {0} (took {1} seconds)",
-				(0 == compiler.ExitCode) ? "successfully" : "with errors",
-				duration.ToString(@"s\.f"));
 		} finally {
 			if (null != response_file)
 				response_file.Close();

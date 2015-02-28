@@ -38,7 +38,7 @@ class Watcher : IDisposable {
 		this.changes.Add(args.Name);
 	}
 
-	public Boolean WaitFileChanges(TimeSpan timeout, Action<String> callback) {
+	public Boolean WaitFileChanges(Int32 timeout, Action<String> callback) {
 		String name;
 		if (!this.changes.TryTake(out name, timeout))
 			return false;
