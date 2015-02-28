@@ -6,11 +6,25 @@ using System.IO;
 
 class Watcher : IDisposable {
 
-	BlockingCollection<String> changes;
-	FileSystemWatcher fsr;
+	#region struct ChangeRecord
+	struct ChangeRecord {
+
+		public readonly String filename;
+		public readonly WatcherChangeTypes change;
+
+		public ChangeRecord(String filename, WatcherChangeTypes change) {
+			this.filename = filename;
+			this.change = change;
+		}
+
+	}
+	#endregion
+
+	private BlockingCollection<ChangeRecord> changes;
+	private FileSystemWatcher fsr;
 
 	public Watcher(String pattern = "*.ts") {
-		this.changes = new BlockingCollection<String>();
+		this.changes = new BlockingCollection<ChangeRecord>(new ConcurrentQueue<ChangeRecord>());
 		this.fsr = new FileSystemWatcher() {
 			Path = ".",
 			Filter = pattern,
@@ -35,16 +49,16 @@ class Watcher : IDisposable {
 	}
 
 	private void OnFileSystemEvent(Object sender, FileSystemEventArgs args) {
-		this.changes.Add(args.Name);
+		this.changes.Add(new ChangeRecord(args.Name, args.ChangeType));
 	}
 
-	public Boolean WaitFileChanges(Int32 timeout, Action<String> callback) {
-		String name;
-		if (!this.changes.TryTake(out name, timeout))
+	public Boolean WaitFileChanges(Int32 timeout, Action<String, WatcherChangeTypes> callback) {
+		ChangeRecord item;
+		if (!this.changes.TryTake(out item, timeout))
 			return false;
-		callback(name);
-		while (this.changes.TryTake(out name, timeout))
-			callback(name);
+		callback(item.filename, item.change);
+		while (this.changes.TryTake(out item, timeout))
+			callback(item.filename, item.change);
 		return true;
 	}
 

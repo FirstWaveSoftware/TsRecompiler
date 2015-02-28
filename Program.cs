@@ -45,6 +45,7 @@ class Program {
 	private readonly Arguments args;
 	private readonly Process parent_process;
 	private readonly String tsc_arguments;
+	private readonly HashSet<String> typing_files = new HashSet<String>();
 
 	private Program(Arguments args) {
 		this.args = args;
@@ -70,39 +71,66 @@ class Program {
 	private Boolean Continue { get { return !this.args.MonitorParent || !this.parent_process.HasExited; } }
 
 	private void Run() {
-		Logger.Log("Performing initial compilation...");
-		this.Compile(this.ListTypings(), this.ListSources());
 		if (this.args.Watch) {
 			Logger.Debug("Watch mode enabled");
 			this.Watch();
+		} else {
+			this.PopulateTypings();
+			this.Compile(this.ListSources());
 		}
+	}
+
+	private void PopulateTypings() {
+		foreach (String file in ListTypings())
+			this.typing_files.Add(file);
 	}
 
 	private void Watch() {
 		Boolean changes_detected = true, typing_changed;
-		var change_list = new List<String>();
+		var changeset = new HashSet<String>();
 		using (var watcher = new Watcher()) {
+			this.PopulateTypings();
+			this.Compile(this.ListSources());
 			while (this.Continue) {
-				change_list.Clear();
+				changeset.Clear();
 				typing_changed = false;
 				if (changes_detected)
 					Logger.Log("Waiting for changes...");
-				if (changes_detected = watcher.WaitFileChanges(this.args.WatchTimeout, (file) => this.ProcessChangedFile(file, change_list, ref typing_changed)))
-					if ((0 < change_list.Count) || typing_changed)
-						this.Compile(this.ListTypings(), typing_changed ? this.ListSources() : change_list);
+				if (changes_detected = watcher.WaitFileChanges(
+					this.args.WatchTimeout,
+					(file, change_type) => this.ProcessChangedFile(file, change_type, changeset, ref typing_changed)
+				) && ((0 < changeset.Count) || typing_changed))
+					this.Compile(typing_changed ? this.ListSources() : changeset);
 			}
 		}
 	}
 
-	private void ProcessChangedFile(String file, List<String> change_list, ref Boolean is_typing) {
-		if (!String.IsNullOrEmpty(file) && !this.IsIgnored(file)) {
-			if (file.EndsWith(".d.ts")) {
-				Logger.Log("Typing file changed: {0}", file);
-				is_typing = true;
-			} else {
-				Logger.Log("Source file changed: {0}", file);
-				change_list.Add(file);
+	private void ProcessChangedFile(String file, WatcherChangeTypes change_type, ISet<String> changeset, ref Boolean typing_changed) {
+		if (String.IsNullOrEmpty(file) || this.IsIgnored(file))
+			return;
+		Boolean logit;
+		if (file.EndsWith(".d.ts")) {
+			// Don't incur recompilation if new typing file appeared (it's probably empty anyway)
+			if (0 != (change_type & WatcherChangeTypes.Created))
+				logit = this.typing_files.Add(file);
+			// Any change or deletion of typing file incurs full recompilation
+			else {
+				if (0 != (change_type & WatcherChangeTypes.Deleted))
+					this.typing_files.Remove(file);
+				if (logit = changeset.Add(file))
+					typing_changed = true;
 			}
+			if (logit)
+				Logger.Log("Typing {0}: {1}", change_type, file);
+		} else {
+			// Don't bother recompiling deleted source file
+			if (0 != (change_type & WatcherChangeTypes.Deleted))
+				logit = changeset.Remove(file);
+			// Add source file to changeset for recompilation
+			else
+				logit = changeset.Add(file);
+			if (logit)
+				Logger.Log("Source {0}: {1}", change_type, file);
 		}
 	}
 
@@ -113,6 +141,12 @@ class Program {
 				return true;
 			}
 		return false;
+	}
+
+	private IEnumerable<String> FilterSources(IEnumerable<String> files) {
+		foreach (String file in files)
+			if (!file.EndsWith(".d.ts"))
+				yield return file;
 	}
 
 	private IEnumerable<String> ListSources() {
@@ -135,24 +169,22 @@ class Program {
 		}
 	}
 
-	private void Compile(IEnumerable<String> typings, IEnumerable<String> sources) {
+	private void Compile(IEnumerable<String> sources) {
 		String cwd = Directory.GetCurrentDirectory();
 		StreamWriter response_file = null;
 		try {
-			Int32 nr_files = 0;
+			Int32 nr_sources = 0;
 			// Compile response file
 			response_file = new StreamWriter(File.OpenWrite(response_file_name));
-			foreach (String file in typings) {
+			foreach (String file in this.typing_files)
 				response_file.WriteLine(file);
-				++nr_files;
-			}
-			foreach (String file in sources) {
+			foreach (String file in FilterSources(sources)) {
 				response_file.WriteLine(file);
-				++nr_files;
+				++nr_sources;
 			}
 			response_file.Close();
 			response_file = null;
-			if (0 == nr_files) {
+			if (0 == nr_sources) {
 				Logger.Log("Nothing to compile");
 				return;
 			}
@@ -194,6 +226,7 @@ class Program {
 					"Compilation completed {0} (in {1} seconds)",
 					(0 == compiler.ExitCode) ? "successfully" : "with errors",
 					duration.ToString(@"s\.f"));
+				Logger.Log();
 				// Throw up if not watching (looping)
 				if ((0 != compiler.ExitCode) && !this.args.Watch)
 					throw new CodedException(compiler.ExitCode);
